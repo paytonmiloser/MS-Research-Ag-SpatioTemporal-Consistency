@@ -1,0 +1,307 @@
+---
+title: "simulation study"
+author: "Payton Miloser"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+Subsetting the Data to an "unidentifiable" square
+```{r}
+#define the rectangular area of the field
+
+#original plot of field
+ggplot(data = farm) + geom_sf() + xlab("Longitude") + ylab("Latitude")
+
+farm$Lon.keep <- ifelse(farm$temp2.LON..24820. < -92.558, farm$temp2.LON..24820., NA)
+farm$Lat.keep <- ifelse(farm$temp2.LAT..24820. < 42.899, farm$temp2.LAT..24820., NA)
+
+farm.square <- data.frame(Long = farm$Lon.keep, 
+                          lat = farm$Lat.keep, 
+                          yield = farm$temp2.YIELD..24820., farm$geometry, farm$log.Yield)
+
+farm.square <- na.omit(farm.square)
+farm.square <- st_as_sf(farm.square, coords = c("Long", "lat"), crs = 4326)
+
+ggplot(data=farm.square) + geom_sf() +  xlab("Longitude") + ylab("Latitude")
+
+
+farm.square <- data.frame(Long = farm$Lon.keep, 
+                          lat = farm$Lat.keep, 
+                          yield = farm$temp2.YIELD..24820., farm$geometry, farm$log.Yield)
+
+#subset more where long < 92.560 to get a better/smaller area to work with (something less identifiable)
+farm.square$Long <- ifelse(farm.square$Long < -92.560, farm.square$Long, NA)
+farm.square <- na.omit(farm.square)
+farm.square <- st_as_sf(farm.square, coords = c("Long", "lat"), crs = 4326)
+ggplot(data=farm.square) + geom_sf() +  xlab("Longitude") + ylab("Latitude")
+
+
+farm.square <- data.frame(Long = farm$Lon.keep, 
+                          lat = farm$Lat.keep, 
+                          yield = farm$temp2.YIELD..24820., farm$geometry, farm$log.Yield)
+farm.square$Long <- ifelse(farm.square$Long < -92.560, farm.square$Long, NA)
+farm.square <- na.omit(farm.square)
+
+```
+
+
+Test for the new square! - model
+```{r}
+#smoothing attempt using tensor product splines
+z <- farm.square$farm.log.Yield
+x <- farm.square$Long
+y <- farm.square$lat
+
+smoothtest.square <- data.frame(z, x, y) #data
+
+#adjust for Nas and 0s
+sum(ifelse(is.na(z)==TRUE, 1, 0))
+which(is.na(z)==TRUE)
+
+sum(ifelse(is.infinite(z)==TRUE, 1, 0))
+
+smoothtest.square$z <- ifelse(is.infinite(smoothtest.square$z)==TRUE, NA, smoothtest.square$z)
+smoothtest.square <- na.omit(smoothtest.square) #get rid of bad stuff
+
+sum(ifelse(is.infinite(smoothtest.square$z)==TRUE, 1, 0))
+
+#model!
+model.square <- gam(z ~ te(x, y), data=smoothtest.square) 
+summary(model.square)
+plot(model.square)
+```
+
+```{r}
+#center/scale the grid
+sd.square <- sd(smoothtest.square$z)
+#center: subtract the mean
+smoothtest.square$z.scaled <- smoothtest.square$z - mean(smoothtest.square$z)
+#standardize: divide by in field standard deviation
+smoothtest.square$z.scaled <- (smoothtest.square$z.scaled/ sd.square)
+
+#scaled models
+scaled.square <- gam(z.scaled ~ te(x, y), data=smoothtest.square)
+summary(scaled.square)
+plot(scaled.square)
+```
+
+
+Create the grid around the box:
+```{r}
+library(sf)
+
+farm.square <- st_as_sf(farm.square, coords = c("Long", "lat"), crs = 4326)
+
+# Ensure farm.square has a valid CRS
+if (is.na(st_crs(farm.square))) {
+  st_crs(farm.square) <- 4326  # Assuming WGS 84, update if needed
+}
+
+# Step 1: Create a grid around the bounding box of farm.square
+grid.square <- st_make_grid(farm.square, n = c(50, 50))
+grid.square <- st_as_sf(grid.square)
+plot(grid.square)
+smooth.square <- st_as_sf(smoothtest.square, coords = c("x", "y"), crs = st_crs(grid.square))
+
+# Step 3: Apply a small buffer to smooth.square
+grid.sq <- st_buffer(smooth.square, 0.00001)
+
+# Step 4: Union the buffered geometries
+grid.test.sq <- st_union(grid.sq)
+
+st_crs(grid.test.sq) <- st_crs(grid.square)
+
+grid.test3 <- st_filter(grid.square, grid.test.sq)
+
+plot(grid.test3)
+
+```
+
+
+Plot model & yield
+```{r}
+square <- as.data.frame(st_coordinates(st_centroid(grid.test3)))
+names(square) <- c("x", "y")
+
+grid.test3$pred.07.sq <- predict(scaled.square, newdata=square)
+plot(grid.test3["pred.07.sq"])
+```
+
+
+
+The above code works to run the basic methodology on a smaller rectangular part of the original field. (Tested on 2007 data)
+
+
+
+
+Below will begin the simulation code.
+
+```{r}
+#install.packages(c("fields", "MASS", "RandomFields"))
+
+# Load libraries
+library(fields)
+library(MASS)
+library(mgcv)
+```
+
+```{r}
+# Define spatial grid for the simulation (50 × 50)
+x_seq <- seq(0, 100, length.out = 51)
+y_seq <- seq(0, 100, length.out = 51)
+grid <- expand.grid(x = x_seq, y = y_seq)
+
+
+#Use spatial grid based on farm square we already have?
+plot(square)
+```
+
+
+
+
+April 2025 Update:
+```{r}
+#field to simulate on = grid (a field defined by ME)
+plot(grid) #Not equivalent to the data field
+coords <- grid
+
+
+#simulate GP/MVN yield data
+sim.field <- function(coords, range, sill=1, nugget=0.1){
+  dists <- rdist(coords)
+  covMat <- sill * exp(-dists/range)
+  diag(covMat) <- sill + nugget
+  yield.field <- mvrnorm(1, mu = rep(0, nrow(coords)), Sigma=covMat)
+  return(yield.field)
+}
+
+
+# Simulate fields with different spatial consistency (toy example)
+low_consistency <- sim.field(coords, range = 0.5)  
+medium_consistency <- sim.field(coords, range = 2, sill=1, nugget=0.1)  
+medium_consistency2 <- sim.field(coords, range = 2)  
+high_consistency <- sim.field(coords, range = 5)  
+
+
+
+data <- data.frame(coords, 
+                   medium = medium_consistency)
+
+
+# Function to fit a GAM and visualize results
+plot_gam_smooth <- function(data, response, title) {
+  
+  # Fit a GAM with tensor product splines
+  gam_model <- gam(as.formula(paste(response, "~ te(x, y, bs = 'tp')")), data = data)
+  
+  data$predicted <- predict(gam_model, newdata = data)
+
+  ggplot(data, aes(x, y)) +
+    geom_tile(aes(fill = predicted)) +
+    scale_fill_viridis_c() +
+    labs(title = title, fill = "Yield") +
+    theme_minimal()
+}
+
+
+
+plot_gam_smooth(data, "low", "High Spatial Consistency")
+ gam_model <- gam(data$low ~ te(x, y, bs = 'tp'), data = data) # is spline smoothing TOO much?
+ summary(gam_model)
+
+
+plot_gam_smooth(data, "medium", "Medium Spatial Consistency")
+ gam_model <- gam(data$medium ~ te(x, y, bs = 'tp'), data = data)
+ summary(gam_model)
+ 
+ plot_gam_smooth(data, "medium2", "Medium Spatial Consistency")
+ gam_model <- gam(data$medium2 ~ te(x, y, bs = 'tp'), data = data)
+ summary(gam_model)
+ 
+ 
+ 
+plot_gam_smooth(data, "high", "Low Spatial Consistency, More localized differences in yield")
+ gam_model <- gam(data$high ~ te(x, y, bs = 'tp'), data = data)
+ summary(gam_model)
+```
+
+
+spatial variability AND consistency - separate concepts 
+
+Notes from Messing around with ^: 
+Increase the range parameter to create smoother yield surfaces.
+Modify the nugget effect to introduce small-scale noise.
+Change te(x, y, k=…) in gam() to control spline flexibility.
+
+
+How to simulate multiple years worth of data?
+
+
+Knot check function on splines- simon wood
+
+
+
+Start w medium template - years worth of data, very temporally consistent, BUT not identical
+add noise to the template
+need time dependence, not just new simulated data - add time and noise for each "year"
+
+generate a SF w range and sill
+
+field w 0=nug and small sill and play with the range to add to template
+
+
+```{r}
+#simulate GP/MVN yield data
+sim.field <- function(coords, range, sill, nugget){
+  dists <- rdist(coords)
+  covMat <- sill * exp(-dists/range)
+  diag(covMat) <- sill + nugget
+  yield.field <- mvrnorm(1, mu = rep(0, nrow(coords)), Sigma=covMat)
+  return(yield.field)
+}
+
+plot_gam_smooth <- function(data, response, title) {
+  
+  # Fit a GAM with tensor product splines
+  gam_model <- gam(as.formula(paste(response, "~ te(x, y, bs = 'tp')")), data = data)
+  
+  data$predicted <- predict(gam_model, newdata = data)
+
+  ggplot(data, aes(x, y)) +
+    geom_tile(aes(fill = predicted)) +
+    scale_fill_viridis_c() +
+    labs(title = title, fill = "Yield") +
+    theme_minimal()
+}
+
+
+
+medium_consistency <- sim.field(coords, range = 2, sill=1, nugget=0.1)  
+year1 <- sim.field(coords, range=2, sill=1.5, nugget = 0) # same conditional dist by YEAR
+year2 <- sim.field(coords, range=2, sill=1.5, nugget=0)
+
+
+data <- data.frame(coords, 
+                   medium = medium_consistency, year1=year1, medium1 = medium_consistency + year1, medium2 = medium_consistency + year2)
+
+plot_gam_smooth(data, "year1", "TEST year 1")
+plot_gam_smooth(data, "medium", "TEST medium start")
+plot_gam_smooth(data, "medium1", "TEST medium year 1")
+plot_gam_smooth(data, "medium2", "TEST medium year 2")
+
+
+```
+
+
+Moving forward: make grid smaller, play around for small number of datasets (10), 3 years for each template, figure out what info I need to collect from each dataset to answer the questions I have (Does this method work?)
+Organize a paper - what claims do I want to make and how can I prove that?
+ratio of sills? - variance comparisons
+
+
+
