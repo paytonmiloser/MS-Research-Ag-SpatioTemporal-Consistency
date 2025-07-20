@@ -1,0 +1,612 @@
+---
+title: "Organizeed_2007_2008_2009"
+author: "Payton Miloser"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#packages
+library(sf)
+library(tidyverse)
+library(sp)
+library(dplyr) 
+library(ggspatial)
+library(raster)
+library(RColorBrewer)
+library(mgcv)
+library(mgcViz)
+library(gstat)
+library(tmap)
+library(stars)
+library(ggplot2)
+```
+
+```{r}
+#Data
+#2007:
+path <- "C://Users//pmilo//OneDrive//Desktop//iowa state university//Grad School Year 2//Masters CC//Data//2007//2007"
+setwd(path) #set working directory
+
+#read in shape files 2007
+shape.files = list.files(path, full.name = FALSE, pattern="*shp")
+shape.files #grab files and names
+shx.files = list.files(path, full.name = TRUE, pattern="*shx")
+dbf.files = list.files(path, full.names = FALSE, pattern = "*dbf")
+
+for (i in 1:length(shape.files)){ #read in files individually
+  setwd(path)
+  assign(shape.files[i], st_read(shape.files[i])) #should be taking all the files into account
+} 
+
+```
+
+```{r}
+#test plot see whole shape
+temp2 <- st_read(shape.files[22]) 
+# plot(st_geometry(temp2), axes=TRUE)
+
+#get rid of weird polygon
+head(st_coordinates(temp2))
+which(st_coordinates(temp2)[,1] < -92.59)
+st_coordinates(temp2)[124090:124105,]
+st_coordinates(temp2)[-c(124098:124099),]
+# plot(st_coordinates(temp2)[-c(124098:124099),], axes=TRUE)
+# View(st_coordinates(temp2))
+
+#store adjusted coordinates
+coordinates <- st_coordinates(temp2)
+coordinates <- st_coordinates(temp2)[-c(124098:124099),]
+
+#Nice plot without bad polyogn
+# plot(st_geometry(temp2)[-24820], axes=TRUE, graticule = TRUE, xaxs = "i", cex.axis=0.75, col="pink")
+```
+
+```{r}
+#attempt different visuals
+farm <- st_geometry(temp2)[-24820]
+farm <- data.frame(farm, temp2$LON[-24820], temp2$LAT[-24820], temp2$YIELD[-24820])
+farm <- st_as_sf(farm)
+
+ggplot(data = farm) + geom_sf() + xlab("Longitude") + ylab("Latitude")
+
+#adjust data for 0s and Nas
+farm$log.Yield <- log(farm$temp2.YIELD..24820.)
+ifelse(is.na(farm$log.Yield), 0, ifelse(farm$log.Yield == "-Inf", 0, farm$log.Yield))
+```
+
+```{r}
+#smoothing attempt using tensor product splines
+z <- farm$log.Yield
+x <- farm$temp2.LON..24820.
+y <- farm$temp2.LAT..24820.
+
+smooth <- data.frame(z, x, y) #data
+
+#adjust for Nas and 0s
+sum(ifelse(is.na(z)==TRUE, 1, 0))
+which(is.na(z)==TRUE)
+smooth <- smooth[-24972,]
+
+sum(ifelse(is.infinite(z)==TRUE, 1, 0))
+
+smooth$z <- ifelse(is.infinite(smooth$z)==TRUE, NA, smooth$z)
+
+sum(ifelse(is.infinite(smooth$z)==TRUE, 1, 0))
+smooth <- na.omit(smooth)
+
+#model!
+model <- gam(z ~ te(x,y), data=smooth) #IT WORKS FOR 2007
+summary(model)
+
+model$var.summary
+```
+
+```{r}
+#plot smoothed model with interpolation 
+plot(model)
+plot(model, scheme = 1) #3D plot of contours
+plot(model, scheme = 2) #heat map
+
+vis.gam(x = model,                # GAM object   # variables
+        plot.type = "persp", theta = 200, phi = 30)
+
+vis.gam(model, view = c("x", "y"), 
+       plot.type = "contour", too.far = 0.02, color="terrain", n.grid = 100)
+points(grid, pch=19, cex=2)#10%
+
+# Overlay data
+points(smooth$x, smooth$y)
+
+
+plot(y = model$residuals, x = model$fitted.values, main="Residuals vs. Fitted Values", xlab="Fitted Values", ylab="Residuals")
+abline
+
+par(mfrow = c(2, 2))
+gam.check(model)
+
+plot(te(smooth$x, smooth$y))
+
+library(dplyr)
+library(lattice)
+
+wireframe(z~te(x,y), smooth)
+
+
+```
+
+
+
+
+
+```{r}
+#2008 Data
+path <- "C://Users//pmilo//OneDrive//Desktop//iowa state university//Grad School Year 2//Masters CC//Data//2008"
+setwd(path) #set working directory
+
+shape.files08 = list.files(path, full.name = FALSE, pattern="*shp")
+shape.files08 #grab files and names
+shx.files08 = list.files(path, full.name = TRUE, pattern="*shx")
+dbf.files08 = list.files(path, full.names = FALSE, pattern = "*dbf")
+
+for (i in 1:length(shape.files08)){ #read in files individually
+  setwd(path)
+  assign(shape.files08[i], st_read(shape.files08[i])) #should be taking all the files into account
+}
+
+```
+
+```{r}
+#append all data filed to make one big data file
+list08 <- list(0)
+#Make a list of all the data files (shape files)
+for (i in 1:315) {
+  dat <- data.frame(st_read(shape.files08[i]))
+  list08[[i]] <- dat
+}
+
+big_data08 = bind_rows(list08)
+big_data08 <- st_as_sf(big_data08)
+```
+
+```{r}
+#smoothing attempt using tensor product splines
+z <- log(big_data08$YIELD)
+x <- big_data08$LON
+y <- big_data08$LAT
+
+smooth08 <- data.frame(z, x, y) #data
+
+#adjust for Nas and 0s
+sum(ifelse(is.na(z)==TRUE, 1, 0))
+which(is.na(z)==TRUE)
+
+sum(ifelse(is.infinite(z)==TRUE, 1, 0))
+
+smooth08$z <- ifelse(is.infinite(smooth08$z)==TRUE, NA, smooth08$z)
+smooth08 <- na.omit(smooth08) #get rid of bad stuff
+
+sum(ifelse(is.infinite(smooth08$z)==TRUE, 1, 0))
+
+#model!
+model08 <- gam(z ~ te(x, y), data=smooth08) #IT WORKS FOR 2007
+summary(model08)
+```
+
+```{r}
+#2008 tensor product splines visuals
+vis.gam(x = model08,                # GAM object
+        view = c("x", "y"),   # variables
+        plot.type = "contour")
+
+vis.gam(model08, view = c("x", "y"), 
+       plot.type = "contour", too.far = 0.02, color="terrain") #2%
+
+# Overlay data
+points(smooth08$x, smooth08$y)
+
+plot(y = model08$residuals, x = model08$fitted.values, main="Residuals vs. Fitted Values", xlab="Fitted Values", ylab="Residuals")
+abline(h=0, col="red")
+
+par(mfrow = c(2, 2))
+gam.check(model08)
+```
+
+
+
+
+
+
+
+```{r}
+#2009 Data
+path <- "C://Users//pmilo//OneDrive//Desktop//iowa state university//Grad School Year 2//Masters CC//Data//2009"
+setwd(path) #set working directory
+
+shape.files09 = list.files(path, full.name = FALSE, pattern="*shp")
+shape.files09 #grab files and names
+shx.files09 = list.files(path, full.name = TRUE, pattern="*shx")
+dbf.files09 = list.files(path, full.names = FALSE, pattern = "*dbf")
+
+for (i in 1:length(shape.files09)){ #read in files individually
+  setwd(path)
+  assign(shape.files09[i], st_read(shape.files09[i])) #should be taking all the files into account
+}
+
+
+```
+
+```{r}
+#append all data filed to make one big data file
+list09 <- list(0)
+#Make a list of all the data files (shape files)
+for (i in 1:246) {
+  dat <- data.frame(st_read(shape.files09[i]))
+  list09[[i]] <- dat
+}
+
+big_data09 = do.call(rbind, list09)
+big_data09 <- st_as_sf(big_data09)
+
+# plot(st_geometry(big_data09), axes=TRUE)
+```
+
+```{r}
+#smoothing attempt using tensor product splines
+z <- log(big_data09$YIELD)
+x <- big_data09$LON
+y <- big_data09$LAT
+
+smooth09 <- data.frame(z, x, y) #data
+
+#adjust for Nas and 0s
+sum(ifelse(is.na(z)==TRUE, 1, 0))
+which(is.na(z)==TRUE)
+
+sum(ifelse(is.infinite(z)==TRUE, 1, 0))
+
+smooth09$z <- ifelse(is.infinite(smooth09$z)==TRUE, NA, smooth09$z)
+smooth09 <- na.omit(smooth09) #get rid of bad stuff
+
+sum(ifelse(is.infinite(smooth09$z)==TRUE, 1, 0))
+
+#model!
+model09 <- gam(z ~ te(x, y), data=smooth09) #IT WORKS FOR 2007
+summary(model09)
+```
+
+```{r}
+#2009 tensor product splines visuals
+vis.gam(x = model09,                # GAM object
+        view = c("x", "y"),   # variables
+        plot.type = "contour")
+
+vis.gam(model09, view = c("x", "y"), 
+       plot.type = "contour", too.far = 0.02, color="terrain") #2%
+
+# Overlay data
+points(smooth09$x, smooth09$y)
+
+plot(y = model09$residuals, x = model09$fitted.values, main="Residuals vs. Fitted Values", xlab="Fitted Values", ylab="Residuals")
+abline(h=0, col="red")
+
+par(mfrow = c(2, 2))
+gam.check(model09)
+
+```
+
+
+
+
+
+
+
+```{r}
+#2010 Data
+path <- "C://Users//pmilo//OneDrive//Desktop//iowa state university//Grad School Year 2//Masters CC//Data//2010"
+setwd(path) #set working directory
+
+shape.files10 = list.files(path, full.name = FALSE, pattern="*shp")
+shape.files10 #grab files and names
+shx.files10 = list.files(path, full.name = TRUE, pattern="*shx")
+dbf.files10 = list.files(path, full.names = FALSE, pattern = "*dbf")
+
+for (i in 1:length(shape.files10)){ #read in files individually
+  setwd(path)
+  assign(shape.files10[i], st_read(shape.files10[i])) #should be taking all the files into account
+}
+
+```
+
+```{r}
+#append all data filed to make one big data file
+list10 <- list(0)
+#Make a list of all the data files (shape files)
+for (i in 1:length(shape.files10)) {
+  dat <- data.frame(st_read(shape.files10[i]))
+  list10[[i]] <- dat
+}
+
+big_data10 = bind_rows(list10)
+big_data10 <- st_as_sf(big_data10)
+```
+
+```{r}
+#smoothing attempt using tensor product splines
+z <- log(big_data10$YIELD)
+x <- big_data10$LON
+y <- big_data10$LAT
+
+smooth10 <- data.frame(z, x, y) #data
+
+#adjust for Nas and 0s
+sum(ifelse(is.na(z)==TRUE, 1, 0))
+which(is.na(z)==TRUE)
+
+sum(ifelse(is.infinite(z)==TRUE, 1, 0))
+
+smooth10$z <- ifelse(is.infinite(smooth10$z)==TRUE, NA, smooth10$z)
+smooth10 <- na.omit(smooth10) #get rid of bad stuff
+
+sum(ifelse(is.infinite(smooth10$z)==TRUE, 1, 0))
+
+#model!
+model10 <- gam(z ~ te(x, y), data=smooth10) #IT WORKS FOR 2007
+summary(model10)
+```
+
+
+
+```{r}
+#2011 Data
+path <- "C://Users//pmilo//OneDrive//Desktop//iowa state university//Grad School Year 2//Masters CC//Data//2011"
+setwd(path) #set working directory
+
+shape.files11 = list.files(path, full.name = FALSE, pattern="*shp")
+shape.files11 #grab files and names
+shx.files11 = list.files(path, full.name = TRUE, pattern="*shx")
+dbf.files11 = list.files(path, full.names = FALSE, pattern = "*dbf")
+
+for (i in 1:length(shape.files11)){ #read in files individually
+  setwd(path)
+  assign(shape.files11[i], st_read(shape.files11[i])) #should be taking all the files into account
+}
+
+```
+
+```{r}
+#append all data filed to make one big data file
+list11 <- list(0)
+#Make a list of all the data files (shape files)
+for (i in 1:length(shape.files11)) {
+  dat <- data.frame(st_read(shape.files11[i]))
+  list11[[i]] <- dat
+}
+
+big_data11 = bind_rows(list11)
+big_data11 <- st_as_sf(big_data11)
+```
+
+```{r}
+#smoothing attempt using tensor product splines
+z <- log(big_data11$YIELD)
+x <- big_data11$LON
+y <- big_data11$LAT
+
+smooth11 <- data.frame(z, x, y) #data
+
+#adjust for Nas and 0s
+sum(ifelse(is.na(z)==TRUE, 1, 0))
+which(is.na(z)==TRUE)
+
+sum(ifelse(is.infinite(z)==TRUE, 1, 0))
+
+smooth11$z <- ifelse(is.infinite(smooth11$z)==TRUE, NA, smooth11$z)
+smooth11 <- na.omit(smooth11) #get rid of bad stuff
+
+sum(ifelse(is.infinite(smooth11$z)==TRUE, 1, 0))
+
+#model!
+model11 <- gam(z ~ te(x, y), data=smooth11) #IT WORKS FOR 2007
+summary(model11)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+#center/scale the grids 
+sd.07 <- sd(smooth$z)
+sd.08 <- sd(smooth08$z)
+sd.09 <- sd(smooth09$z)
+sd.10 <- sd(smooth10$z)
+sd.11 <- sd(smooth11$z)
+
+#center: subtract the mean
+smooth$z.scaled <- smooth$z - mean(smooth$z)
+smooth08$z.scaled <- smooth08$z - mean(smooth08$z)
+smooth09$z.scaled <- smooth09$z - mean(smooth09$z)
+smooth10$z.scaled <- smooth10$z - mean(smooth10$z)
+smooth11$z.scaled <- smooth11$z - mean(smooth11$z)
+
+#standardize: divide by in field standard deviation
+smooth$z.scaled <- (smooth$z.scaled/ sd.07)
+smooth08$z.scaled <- (smooth08$z.scaled/ sd.08)
+smooth09$z.scaled <- (smooth09$z.scaled/ sd.09)
+smooth10$z.scaled <- (smooth10$z.scaled / sd.10)
+smooth11$z.scaled <- (smooth11$z.scaled / sd.11)
+
+```
+
+```{r}
+#scaled models
+scaled.07 <- gam(z.scaled ~ te(x, y), data=smooth)
+summary(scaled.07)
+vis.gam(scaled.07, view = c("x", "y"), 
+       plot.type = "contour", too.far = 0.02, color="terrain") #2%
+
+
+scaled.08 <- gam(z.scaled ~ te(x, y), data=smooth08)
+summary(scaled.08)
+vis.gam(scaled.08, view = c("x", "y"), 
+       plot.type = "contour", too.far = 0.02, color="terrain") #2%
+
+
+scaled.09 <- gam(z.scaled ~ te(x, y), data=smooth09)
+summary(scaled.09)
+vis.gam(scaled.09, view = c("x", "y"), 
+       plot.type = "contour", too.far = 0.02, color="terrain") #2%
+
+
+scaled.10 <- gam(z.scaled ~ te(x, y), data=smooth10)
+summary(scaled.10)
+vis.gam(scaled.10, view = c("x", "y"), 
+       plot.type = "contour", too.far = 0.02, color="terrain") #2%
+
+scaled.11 <- gam(z.scaled ~ te(x, y), data=smooth11)
+summary(scaled.11)
+vis.gam(scaled.11, view = c("x", "y"), 
+       plot.type = "contour", too.far = 0.02, color="terrain") #2%
+
+
+```
+
+
+```{r}
+box <- st_bbox(farm)
+x.grid <- seq(box[1], box[3], 0.001) #made a bunch more points (default is 0.001 for standard point map) 
+y.grid <- seq(box[2], box[4], 0.001)
+
+grid<- expand.grid(x = x.grid, y = y.grid)
+grid08<- expand.grid(x = x.grid, y = y.grid) #same grid just need a copy
+grid09<- expand.grid(x = x.grid, y = y.grid) #same grid just need a copy
+head(grid)
+
+
+grid.2 <- st_make_grid(farm, n=c(50,50))
+grid.2 <- st_as_sf(grid.2)
+plot(grid.2)
+
+
+smooth.sf <- st_as_sf(smooth, coords=c("x","y"))
+plot(smooth.sf)
+grid.test <- st_buffer(smooth.sf, 0.00001)
+grid.test2 <- st_union(grid.test)
+
+plot(grid.test2)
+
+grid.test3 <- st_filter(grid.2, grid.test2)
+plot(grid.test3)
+
+```
+
+
+Better Grid:
+
+```{r}
+grid.2 <- st_make_grid(farm, n=c(50,50))
+grid.2 <- st_as_sf(grid.2)
+# plot(grid.2)
+
+
+smooth.sf <- st_as_sf(smooth, coords=c("x","y"))
+grid.test <- st_buffer(smooth.sf, 0.00001)
+grid.test2 <- st_union(grid.test)
+
+# plot(grid.test2)
+
+grid.test3 <- st_filter(grid.2, grid.test2)
+plot(grid.test3)
+```
+
+
+```{r}
+temp <- as.data.frame(st_coordinates(st_centroid(grid.test3)))
+names(temp) <- c("x", "y")
+
+
+payton <- predict(scaled.07, newdata=temp, se.fit = T)
+grid.test3$pred.07 <- payton$fit
+grid.test3$pred.07.se <- payton$se.fit
+
+# plot(payton) #problem
+
+plot(grid.test3["pred.07"])
+
+grid.test3$pred.08 <- predict(scaled.08, newdata=temp)
+plot(grid.test3["pred.08"])
+
+grid.test3$pred.09 <- predict(scaled.09, newdata=temp)
+plot(grid.test3["pred.09"])
+
+grid.test3$pred.10 <- predict(scaled.10, newdata=temp)
+plot(grid.test3["pred.10"])
+
+grid.test3$pred.11 <- predict(scaled.11, newdata=temp)
+plot(grid.test3["pred.11"])
+
+```
+
+```{r}
+temp.matrix <- as.matrix(st_drop_geometry(grid.test3[,c("pred.07", "pred.08", "pred.09", "pred.10", "pred.11")]))
+
+grid.test3$mean <- apply(temp.matrix, 1, mean)
+grid.test3$std <- apply(temp.matrix, 1, sd)
+
+plot(grid.test3$mean, grid.test3$std, xlab="mean", ylab="standard deviation")
+abline(v = 0, col="red", lwd=2)
+abline(h = mean(grid.test3$std), col="blue", lwd=2)
+
+plot(grid.test3["std"], pal = rev(sf.colors(9))) #flip color scale for sd
+
+plot(grid.test3["mean"])
+```
+
+```{r}
+#take mean-sd plot and color in the interesting points and then map interesting spots vs noninteresting referencing hotspot analysis
+full.dat.final <- data.frame(grid.test3)
+
+full.dat.final$truthordare <- ifelse(full.dat.final$mean > 0 & full.dat.final$std < 0.1195768, 1, 0)
+
+full.dat.final$LowbutCons <- ifelse(full.dat.final$mean < 0 & full.dat.final$std < 0.1195768, 1, 0)
+
+green.dots <- full.dat.final[ which(full.dat.final$mean < 0 & full.dat.final$std < 0.1195768), ]
+
+plot(full.dat.final$mean, full.dat.final$std,  col = factor(full.dat.final$LowbutCons), xlab="mean", ylab="standard deviation")
+abline(v = 0, col="red", lwd=2)
+abline(h = mean(grid.test3$std), col="blue", lwd=2)
+points(green.dots$mean, green.dots$std, col="darkgreen")
+
+```
+
+
+```{r}
+grid.test3$highCons <- full.dat.final$truthordare
+grid.test3$lowCons <- full.dat.final$LowbutCons
+
+plot(grid.test3["highCons"], pal = c("gray", "hotpink"))
+
+plot(grid.test3["lowCons"], pal=c("gray", "darkgreen"))
+
+```
+
+
+
+
+

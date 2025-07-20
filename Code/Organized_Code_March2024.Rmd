@@ -1,0 +1,557 @@
+---
+title: "Organized Code March 2024"
+author: "Payton Miloser"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#packages
+library(sf)
+library(tidyverse)
+library(sp)
+library(dplyr) 
+library(ggspatial)
+library(raster)
+library(RColorBrewer)
+library(mgcv)
+library(mgcViz)
+library(gstat)
+library(tmap)
+library(stars)
+```
+
+```{r}
+#Data
+#2007:
+path <- "C://Users//pmilo//OneDrive//Desktop//iowa state university//Grad School Year 2//Masters CC//Data//2007//2007"
+setwd(path) #set working directory
+
+#read in shape files 2007
+shape.files = list.files(path, full.name = FALSE, pattern="*shp")
+shape.files #grab files and names
+shx.files = list.files(path, full.name = TRUE, pattern="*shx")
+dbf.files = list.files(path, full.names = FALSE, pattern = "*dbf")
+
+for (i in 1:length(shape.files)){ #read in files individually
+  setwd(path)
+  assign(shape.files[i], st_read(shape.files[i])) #should be taking all the files into account
+} 
+
+```
+
+```{r}
+#test plot see whole shape
+temp2 <- st_read(shape.files[22]) 
+plot(st_geometry(temp2), axes=TRUE)
+
+#get rid of weird polygon
+head(st_coordinates(temp2))
+which(st_coordinates(temp2)[,1] < -92.59)
+st_coordinates(temp2)[124090:124105,]
+st_coordinates(temp2)[-c(124098:124099),]
+# plot(st_coordinates(temp2)[-c(124098:124099),], axes=TRUE)
+# View(st_coordinates(temp2))
+
+#store adjusted coordinates
+coordinates <- st_coordinates(temp2)
+coordinates <- st_coordinates(temp2)[-c(124098:124099),]
+
+#Nice plot without bad polyogn
+# plot(st_geometry(temp2)[-24820], axes=TRUE, graticule = TRUE, xaxs = "i", cex.axis=0.75, col="pink")
+```
+
+```{r}
+#attempt different visuals
+farm <- st_geometry(temp2)[-24820]
+farm <- data.frame(farm, temp2$LON[-24820], temp2$LAT[-24820], temp2$YIELD[-24820])
+farm <- st_as_sf(farm)
+
+ggplot(data = farm) + geom_sf()
+
+#adjust data for 0s and Nas
+farm$log.Yield <- log(farm$temp2.YIELD..24820.)
+ifelse(is.na(farm$log.Yield), 0, ifelse(farm$log.Yield == "-Inf", 0, farm$log.Yield))
+```
+
+```{r}
+#smoothing attempt using tensor product splines
+z <- farm$log.Yield
+x <- farm$temp2.LON..24820.
+y <- farm$temp2.LAT..24820.
+
+smooth <- data.frame(z, x, y) #data
+
+#adjust for Nas and 0s
+sum(ifelse(is.na(z)==TRUE, 1, 0))
+which(is.na(z)==TRUE)
+smooth <- smooth[-24972,]
+
+sum(ifelse(is.infinite(z)==TRUE, 1, 0))
+
+smooth$z <- ifelse(is.infinite(smooth$z)==TRUE, NA, smooth$z)
+
+sum(ifelse(is.infinite(smooth$z)==TRUE, 1, 0))
+smooth <- na.omit(smooth)
+
+#model!
+model <- gam(z ~ te(x, y), data=smooth) #IT WORKS FOR 2007
+summary(model)
+```
+
+```{r}
+#plot smoothed model with interpolation 
+plot(model)
+plot(model, scheme = 1) #3D plot of contours
+plot(model, scheme = 2) #heat map
+
+vis.gam(x = model,                # GAM object
+        view = c("x", "y"),   # variables
+        plot.type = "contour")
+
+vis.gam(model, view = c("x", "y"), 
+       plot.type = "contour", too.far = 0.03, color="terrain", n.grid = 100) #1%
+
+# Overlay data
+points(smooth$x, smooth$y)
+
+
+#Moving Forward...
+#exclude some polygons - the weird ones
+#drop missing NA/infs in data
+#plot.gam
+
+```
+
+```{r}
+#Make my own contour/Yield plot using the tensor spline model
+#use farm for SF operations, use smooth for model based operations
+
+g <- st_make_grid(farm, square=TRUE, n = c())
+#n controls how many boxes there are
+
+plot(g)
+plot(st_geometry(farm), add = TRUE)
+axis(1)
+axis(2)
+
+plot(g[farm], col = '#ff000088', add = TRUE) #knows which squares the farm is in
+```
+
+
+
+
+
+
+```{r}
+#2008 Data
+path <- "C://Users//pmilo//OneDrive//Desktop//iowa state university//Grad School Year 2//Masters CC//Data//2008"
+setwd(path) #set working directory
+
+shape.files08 = list.files(path, full.name = FALSE, pattern="*shp")
+shape.files08 #grab files and names
+shx.files08 = list.files(path, full.name = TRUE, pattern="*shx")
+dbf.files08 = list.files(path, full.names = FALSE, pattern = "*dbf")
+
+for (i in 1:length(shape.files08)){ #read in files individually
+  setwd(path)
+  assign(shape.files08[i], st_read(shape.files08[i])) #should be taking all the files into account
+}
+
+```
+
+```{r}
+#append all data filed to make one big data file
+list08 <- list(0)
+#Make a list of all the data files (shape files)
+for (i in 1:315) {
+  dat <- data.frame(st_read(shape.files08[i]))
+  list08[[i]] <- dat
+}
+
+big_data08 = bind_rows(list08)
+big_data08 <- st_as_sf(big_data08)
+```
+
+```{r}
+#smoothing attempt using tensor product splines
+z <- log(big_data08$YIELD)
+x <- big_data08$LON
+y <- big_data08$LAT
+
+smooth08 <- data.frame(z, x, y) #data
+
+#adjust for Nas and 0s
+sum(ifelse(is.na(z)==TRUE, 1, 0))
+which(is.na(z)==TRUE)
+
+sum(ifelse(is.infinite(z)==TRUE, 1, 0))
+
+smooth08$z <- ifelse(is.infinite(smooth08$z)==TRUE, NA, smooth08$z)
+smooth08 <- na.omit(smooth08) #get rid of bad stuff
+
+sum(ifelse(is.infinite(smooth08$z)==TRUE, 1, 0))
+
+#model!
+model08 <- gam(z ~ te(x, y), data=smooth08) #IT WORKS FOR 2007
+summary(model08)
+```
+
+```{r}
+#2009 tensor product splines visuals
+vis.gam(x = model08,                # GAM object
+        view = c("x", "y"),   # variables
+        plot.type = "contour")
+
+vis.gam(model08, view = c("x", "y"), 
+       plot.type = "contour", too.far = 0.02, color="terrain") #2%
+
+# Overlay data
+points(smooth08$x, smooth08$y)
+```
+
+```{r}
+box <- st_bbox(farm)
+x.grid <- seq(box[1], box[3], 0.001)
+y.grid <- seq(box[2], box[4], 0.001)
+
+grid<- expand.grid(x = x.grid, y = y.grid)
+head(grid)
+
+#make 1 grid and apply to every single plot
+
+points(grid)
+
+pred.08 <- predict(model08, newdata=grid)
+#plot the pred.08 instead of the vis.gam
+
+head(pred.08)
+#matrix the vector
+
+grid$pred.08 <- pred.08
+
+grid.sf <- st_as_sf(grid, coords=c("x","y"))
+
+plot(grid.sf, pch=19) #point map
+
+grid.stars <- st_as_stars(grid.sf)
+plot(grid.stars, pch=19) #?????
+#get to raster, plot the raster
+
+#use stars to plot predictions 
+#overlay 
+```
+
+
+
+
+
+```{r}
+#2009 Data
+path <- "C://Users//pmilo//OneDrive//Desktop//iowa state university//Grad School Year 2//Masters CC//Data//2009"
+setwd(path) #set working directory
+
+shape.files09 = list.files(path, full.name = FALSE, pattern="*shp")
+shape.files09 #grab files and names
+shx.files09 = list.files(path, full.name = TRUE, pattern="*shx")
+dbf.files09 = list.files(path, full.names = FALSE, pattern = "*dbf")
+
+for (i in 1:length(shape.files09)){ #read in files individually
+  setwd(path)
+  assign(shape.files09[i], st_read(shape.files09[i])) #should be taking all the files into account
+}
+
+# for (i in 1:length(dbf.files09)){ #read in files individually
+#   setwd(path)
+#   temp <- substring(dbf.files09[i], 1, nchar(dbf.files09[i])-4) #gets rid of extension
+#   assign(dbf.files09[i], read_sf(temp))
+# } 
+
+#see if data read in correctly
+test <- st_read(shape.files09[246]) 
+# plot(st_geometry(test), axes=TRUE)
+
+```
+
+```{r}
+#append all data filed to make one big data file
+list09 <- list(0)
+#Make a list of all the data files (shape files)
+for (i in 1:246) {
+  dat <- data.frame(st_read(shape.files09[i]))
+  list09[[i]] <- dat
+}
+
+big_data09 = do.call(rbind, list09)
+big_data09 <- st_as_sf(big_data09)
+
+# plot(st_geometry(big_data09), axes=TRUE)
+```
+
+```{r}
+#smoothing attempt using tensor product splines
+z <- log(big_data09$YIELD)
+x <- big_data09$LON
+y <- big_data09$LAT
+
+smooth09 <- data.frame(z, x, y) #data
+
+#adjust for Nas and 0s
+sum(ifelse(is.na(z)==TRUE, 1, 0))
+which(is.na(z)==TRUE)
+
+sum(ifelse(is.infinite(z)==TRUE, 1, 0))
+
+smooth09$z <- ifelse(is.infinite(smooth09$z)==TRUE, NA, smooth09$z)
+smooth09 <- na.omit(smooth09) #get rid of bad stuff
+
+sum(ifelse(is.infinite(smooth09$z)==TRUE, 1, 0))
+
+#model!
+model09 <- gam(z ~ te(x, y), data=smooth09) #IT WORKS FOR 2007
+summary(model09)
+```
+
+```{r}
+#2009 tensor product splines visuals
+vis.gam(x = model09,                # GAM object
+        view = c("x", "y"),   # variables
+        plot.type = "contour")
+
+vis.gam(model09, view = c("x", "y"), 
+       plot.type = "contour", too.far = 0.02, color="terrain") #2%
+
+# Overlay data
+points(smooth09$x, smooth09$y)
+```
+
+
+
+```{r}
+#2010 Data
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+#2011 Data
+path <- "C://Users//pmilo//OneDrive//Desktop//iowa state university//Grad School Year 2//Masters CC//Data//2011"
+setwd(path) #set working directory
+
+shape.files11 = list.files(path, full.name = FALSE, pattern="*shp")
+shape.files11 #grab files and names
+shx.files11 = list.files(path, full.name = TRUE, pattern="*shx")
+dbf.files11 = list.files(path, full.names = FALSE, pattern = "*dbf")
+
+for (i in 1:length(shape.files11)){ #read in files individually
+  setwd(path)
+  assign(shape.files11[i], st_read(shape.files11[i])) #should be taking all the files into account
+}
+```
+
+```{r}
+#append all data filed to make one big data file
+list11 <- list(0)
+#Make a list of all the data files (shape files)
+for (i in 1:325) {
+  dat <- data.frame(st_read(shape.files11[i]))
+  list11[[i]] <- dat
+}
+
+big_data11 = do.call(rbind, list11)
+big_data11 <- st_as_sf(big_data11)
+
+# plot(st_geometry(big_data11), axes=TRUE)
+```
+
+```{r}
+#smoothing attempt using tensor product splines
+z <- log(big_data11$YIELD)
+x <- big_data11$LON
+y <- big_data11$LAT
+
+smooth11 <- data.frame(z, x, y) #data
+
+#adjust for Nas and 0s
+sum(ifelse(is.na(z)==TRUE, 1, 0))
+which(is.na(z)==TRUE)
+
+sum(ifelse(is.infinite(z)==TRUE, 1, 0))
+
+smooth11$z <- ifelse(is.infinite(smooth11$z)==TRUE, NA, smooth11$z)
+smooth11 <- na.omit(smooth11) #get rid of bad stuff
+
+sum(ifelse(is.infinite(smooth11$z)==TRUE, 1, 0))
+
+#model!
+model11 <- gam(z ~ te(x, y), data=smooth11) #IT WORKS FOR 2007
+summary(model11)
+```
+
+```{r}
+#2011 tensor product splines visuals
+vis.gam(x = model11,                # GAM object
+        view = c("x", "y"),   # variables
+        plot.type = "contour")
+
+vis.gam(model11, view = c("x", "y"), 
+       plot.type = "contour", too.far = 0.03, color="terrain") #2%
+
+# Overlay data
+points(smooth11$x, smooth11$y)
+```
+
+
+
+
+
+```{r}
+#2012
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+#2013 Data
+path <- "C://Users//pmilo//OneDrive//Desktop//iowa state university//Grad School Year 2//Masters CC//Data//2013"
+setwd(path) #set working directory
+
+shape.files13 = list.files(path, full.name = FALSE, pattern="*shp")
+shape.files13 #grab files and names
+shx.files13 = list.files(path, full.name = TRUE, pattern="*shx")
+dbf.files13 = list.files(path, full.names = FALSE, pattern = "*dbf")
+
+for (i in 1:length(shape.files13)){ #read in files individually
+  setwd(path)
+  assign(shape.files13[i], st_read(shape.files13[i])) #should be taking all the files into account
+}
+```
+
+```{r}
+#append all data filed to make one big data file
+list13 <- list(0)
+#Make a list of all the data files (shape files)
+for (i in 1:185) {
+  dat <- data.frame(st_read(shape.files13[i]))
+  list13[[i]] <- dat
+}
+
+big_data13 = bind_rows(list13)
+big_data13 <- st_as_sf(big_data13)
+
+plot(st_geometry(big_data13), axes=TRUE)
+
+```
+
+```{r}
+#smoothing attempt using tensor product splines
+z <- log(big_data13$YIELD)
+x <- big_data13$LON
+y <- big_data13$LAT
+
+smooth13 <- data.frame(z, x, y) #data
+
+#adjust for Nas and 0s
+sum(ifelse(is.na(z)==TRUE, 1, 0))
+which(is.na(z)==TRUE)
+
+sum(ifelse(is.infinite(z)==TRUE, 1, 0))
+
+smooth13$z <- ifelse(is.infinite(smooth13$z)==TRUE, NA, smooth13$z)
+smooth13 <- na.omit(smooth13) #get rid of bad stuff
+
+sum(ifelse(is.infinite(smooth13$z)==TRUE, 1, 0))
+
+#model!
+model13 <- gam(z ~ te(x, y), data=smooth13) #IT WORKS FOR 2007
+summary(model13)
+```
+
+```{r}
+#2011 tensor product splines visuals
+
+vis.gam(model13, view = c("x", "y"), 
+       plot.type = "contour", too.far = 0.02, color="terrain") #2%
+
+# Overlay data
+points(smooth13$x, smooth13$y)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+#2015 Data
+path <- "C://Users//pmilo//OneDrive//Desktop//iowa state university//Grad School Year 2//Masters CC//Data//2015"
+setwd(path) #set working directory
+
+shape.files15 = list.files(path, full.name = FALSE, pattern="*shp")
+shape.files15 #grab files and names
+shx.files15 = list.files(path, full.name = TRUE, pattern="*shx")
+dbf.files15 = list.files(path, full.names = FALSE, pattern = "*dbf")
+
+for (i in 1:length(shape.files15)){ #read in files individually
+  setwd(path)
+  assign(shape.files15[i], st_read(shape.files15[i])) #should be taking all the files into account
+}
+```
+
+```{r}
+#append all data filed to make one big data file
+list15 <- list(0)
+#Make a list of all the data files (shape files)
+for (i in 1:length(shape.files15)) {
+  dat <- data.frame(st_read(shape.files15[i]))
+  list15[[i]] <- dat
+}
+
+big_data15 = do.call(rbind, list15)
+big_data15 <- st_as_sf(big_data15)
+
+# plot(st_geometry(big_data15), axes=TRUE)
+
+```
+
+
+
+
+
+
+
+
+
