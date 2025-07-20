@@ -1,0 +1,92 @@
+---
+title: "Messing with Data - Dixon"
+author: "Payton Miloser"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, data read in}
+space.1 <- read.csv("C://Users//pmilo//OneDrive//Desktop//iowa state university//Masters CC//Data//DixonMadeUp1.csv", header = TRUE)
+space.2 <- read.csv("C://Users//pmilo//OneDrive//Desktop//iowa state university//Masters CC//Data//DixonMadeUp2.csv", header=TRUE)
+space.3 <- read.csv("C://Users//pmilo//OneDrive//Desktop//iowa state university//Masters CC//Data//DixonMadeUp3.csv", header=TRUE)
+```
+
+```{r, spatial objects}
+library(sf)
+library(sp)
+
+space.1.sf <- st_as_sf(space.1, coords = c("x", "y"))
+grid.space.1 <- st_make_grid(space.1.sf)
+space.2.sf <- st_as_sf(space.2, coords = c("x", "y"))
+space.3.sf <- st_as_sf(space.3, coords = c("x", "y"))
+
+
+#turn into grided data
+```
+
+```{r, plot attempts}
+#blue to yello scale (blue = low yield, yellow=high yield)
+par(mfrow=c(1,3), pty="s")
+plot(space.1.sf["yield1"],  graticule = TRUE, pch = 15, main= "Year 1, Space 1", key.pos = NULL, reset = FALSE)
+plot(space.1.sf["yield2"],  graticule = TRUE, pch = 15, main= "Year 2, Space 1", key.pos = NULL, reset = FALSE)
+plot(space.1.sf["yield3"],  graticule = TRUE, pch = 15, main= "Year 3, Space 1", key.pos = NULL, reset = FALSE)
+
+
+par(mfrow=c(1,3))
+plot(space.2.sf["yield1"],  graticule = TRUE, pch = 15, main= "Year 1, Space 2", key.pos = NULL, reset = FALSE)
+plot(space.2.sf["yield2"],  graticule = TRUE, pch = 15, main= "Year 2, Space 2", key.pos = NULL, reset = FALSE)
+plot(space.2.sf["yield3"],  graticule = TRUE, pch = 15, main= "Year 3, Space 2", key.pos = NULL, reset = FALSE)
+
+par(mfrow=c(1,3))
+plot(space.3.sf["yield1"],  graticule = TRUE, pch = 15, main= "Year 1, Space 3", key.pos = NULL, reset = FALSE)
+plot(space.3.sf["yield2"],  graticule = TRUE, pch = 15, main= "Year 2, Space 3", key.pos = NULL, reset = FALSE)
+plot(space.3.sf["yield3"],  graticule = TRUE, pch = 15, main= "Year 3, Space 3", key.pos = NULL, reset = FALSE)
+```
+
+
+```{r, plots}
+plot(space.1.sf["yield1"],  graticule = TRUE, pch = 15, main= "Year 1, Space 1")
+plot(space.1.sf["yield2"],  graticule = TRUE, pch = 15, main= "Year 2, Space 1")
+plot(space.1.sf["yield3"],  graticule = TRUE, pch = 15, main= "Year 3, Space 1")
+
+plot(space.2.sf["yield1"],  graticule = TRUE, pch = 15, main= "Year 1, Space 2")
+plot(space.2.sf["yield2"],  graticule = TRUE, pch = 15, main= "Year 2, Space 2")
+plot(space.2.sf["yield3"],  graticule = TRUE, pch = 15, main= "Year 3, Space 2")
+
+plot(space.3.sf["yield1"],  graticule = TRUE, pch = 15, main= "Year 1, Space 3")
+plot(space.3.sf["yield2"],  graticule = TRUE, pch = 15, main= "Year 2, Space 3")
+plot(space.3.sf["yield3"],  graticule = TRUE, pch = 15, main= "Year 3, Space 3")
+
+```
+
+```{r, variogram 1}
+install.packages("gstat")
+library(gstat)
+
+TheVariogram = variogram(yield1~1, data=space.1.sf) #variogram for space 1, yield 1
+TheVariogramModel <- vgm(psill=0.15, model="Exp", nugget=0.0001, range=5)
+
+FittedModel <- fit.variogram(TheVariogram, model=TheVariogramModel)    
+plot(TheVariogram, model=FittedModel, ylim=c(25,36), main="Year 1, Plot 1")
+
+summary(FittedModel)
+
+variogram2 = variogram(yield2~1, data=space.1.sf) #variogram for space 1, yield 2
+FittedModel2 <- fit.variogram(variogram2, model=TheVariogramModel)    
+plot(variogram2, model=FittedModel2, ylim=c(25,38), main="Year 2, Plot 1")
+
+variogram3 = variogram(yield3~1, data=space.1.sf) #variogram for space 1, yield 3
+FittedModel3 <- fit.variogram(variogram3, model=TheVariogramModel)    
+plot(variogram3, model=FittedModel3, main="Year 3, Plot 1")
+```
+
+
+
+
+
+
+-PM
