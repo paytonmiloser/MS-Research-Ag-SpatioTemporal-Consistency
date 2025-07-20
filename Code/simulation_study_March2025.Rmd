@@ -1,0 +1,653 @@
+---
+title: "simulation study"
+author: "Payton Miloser"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+Subsetting the Data to an "unidentifiable" square
+```{r}
+#define the rectangular area of the field
+
+#original plot of field
+ggplot(data = farm) + geom_sf() + xlab("Longitude") + ylab("Latitude")
+
+farm$Lon.keep <- ifelse(farm$temp2.LON..24820. < -92.558, farm$temp2.LON..24820., NA)
+farm$Lat.keep <- ifelse(farm$temp2.LAT..24820. < 42.899, farm$temp2.LAT..24820., NA)
+
+farm.square <- data.frame(Long = farm$Lon.keep, 
+                          lat = farm$Lat.keep, 
+                          yield = farm$temp2.YIELD..24820., farm$geometry, farm$log.Yield)
+
+farm.square <- na.omit(farm.square)
+farm.square <- st_as_sf(farm.square, coords = c("Long", "lat"), crs = 4326)
+
+ggplot(data=farm.square) + geom_sf() +  xlab("Longitude") + ylab("Latitude")
+
+
+farm.square <- data.frame(Long = farm$Lon.keep, 
+                          lat = farm$Lat.keep, 
+                          yield = farm$temp2.YIELD..24820., farm$geometry, farm$log.Yield)
+
+#subset more where long < 92.560 to get a better/smaller area to work with (something less identifiable)
+farm.square$Long <- ifelse(farm.square$Long < -92.560, farm.square$Long, NA)
+farm.square <- na.omit(farm.square)
+farm.square <- st_as_sf(farm.square, coords = c("Long", "lat"), crs = 4326)
+ggplot(data=farm.square) + geom_sf() +  xlab("Longitude") + ylab("Latitude")
+
+
+farm.square <- data.frame(Long = farm$Lon.keep, 
+                          lat = farm$Lat.keep, 
+                          yield = farm$temp2.YIELD..24820., farm$geometry, farm$log.Yield)
+farm.square$Long <- ifelse(farm.square$Long < -92.560, farm.square$Long, NA)
+farm.square <- na.omit(farm.square)
+
+```
+
+
+Test for the new square! - model
+```{r}
+#smoothing attempt using tensor product splines
+z <- farm.square$farm.log.Yield
+x <- farm.square$Long
+y <- farm.square$lat
+
+smoothtest.square <- data.frame(z, x, y) #data
+
+#adjust for Nas and 0s
+sum(ifelse(is.na(z)==TRUE, 1, 0))
+which(is.na(z)==TRUE)
+
+sum(ifelse(is.infinite(z)==TRUE, 1, 0))
+
+smoothtest.square$z <- ifelse(is.infinite(smoothtest.square$z)==TRUE, NA, smoothtest.square$z)
+smoothtest.square <- na.omit(smoothtest.square) #get rid of bad stuff
+
+sum(ifelse(is.infinite(smoothtest.square$z)==TRUE, 1, 0))
+
+#model!
+model.square <- gam(z ~ te(x, y), data=smoothtest.square) 
+summary(model.square)
+plot(model.square)
+```
+
+```{r}
+#center/scale the grid
+sd.square <- sd(smoothtest.square$z)
+#center: subtract the mean
+smoothtest.square$z.scaled <- smoothtest.square$z - mean(smoothtest.square$z)
+#standardize: divide by in field standard deviation
+smoothtest.square$z.scaled <- (smoothtest.square$z.scaled/ sd.square)
+
+#scaled models
+scaled.square <- gam(z.scaled ~ te(x, y), data=smoothtest.square)
+summary(scaled.square)
+plot(scaled.square)
+```
+
+
+Create the grid around the box:
+```{r}
+library(sf)
+
+farm.square <- st_as_sf(farm.square, coords = c("Long", "lat"), crs = 4326)
+
+# Ensure farm.square has a valid CRS
+if (is.na(st_crs(farm.square))) {
+  st_crs(farm.square) <- 4326  # Assuming WGS 84, update if needed
+}
+
+# Step 1: Create a grid around the bounding box of farm.square
+grid.square <- st_make_grid(farm.square, n = c(50, 50))
+grid.square <- st_as_sf(grid.square)
+plot(grid.square)
+smooth.square <- st_as_sf(smoothtest.square, coords = c("x", "y"), crs = st_crs(grid.square))
+
+# Step 3: Apply a small buffer to smooth.square
+grid.sq <- st_buffer(smooth.square, 0.00001)
+
+# Step 4: Union the buffered geometries
+grid.test.sq <- st_union(grid.sq)
+
+st_crs(grid.test.sq) <- st_crs(grid.square)
+
+grid.test3 <- st_filter(grid.square, grid.test.sq)
+
+plot(grid.test3)
+
+```
+
+
+Plot model & yield
+```{r}
+square <- as.data.frame(st_coordinates(st_centroid(grid.test3)))
+names(square) <- c("x", "y")
+
+grid.test3$pred.07.sq <- predict(scaled.square, newdata=square)
+plot(grid.test3["pred.07.sq"])
+```
+
+
+```{r}
+#2008
+grid.test3$pred.08 <- predict(scaled.08, newdata=square)
+plot(grid.test3["pred.08"])
+
+```
+
+
+
+```{r}
+#2009
+grid.test3$pred.09 <- predict(scaled.09, newdata=square)
+plot(grid.test3["pred.09"])
+```
+
+
+```{r}
+temp.matrix <- as.matrix(st_drop_geometry(grid.test3[,c("pred.07.sq", "pred.08.sq", "pred.09")]))
+
+grid.test3$mean <- apply(temp.matrix, 1, mean)
+grid.test3$std <- apply(temp.matrix, 1, sd)
+
+plot(grid.test3$mean, grid.test3$std, xlab="mean", ylab="standard deviation")
+abline(v = 0, col="red", lwd=2)
+abline(h = mean(grid.test3$std), col="blue", lwd=2)
+
+pink.dots <- full.dat.final[ which(full.dat.final$mean > 0 & full.dat.final$std < mean(grid.test3$std)),]
+points(pink.dots$mean, pink.dots$std, col="hotpink")
+
+
+
+
+plot(grid.test3["std"], pal = rev(sf.colors(9))) #flip color scale for sd
+
+plot(grid.test3["mean"])
+```
+
+```{r}
+#take mean-sd plot and color in the interesting points and then map interesting spots vs noninteresting referencing hotspot analysis
+full.dat.final <- data.frame(grid.test3)
+
+full.dat.final$truthordare <- ifelse(full.dat.final$mean > 0 & full.dat.final$std < 0.1195768, 1, 0)
+
+full.dat.final$LowbutCons <- ifelse(full.dat.final$mean < 0 & full.dat.final$std < mean(grid.test3$std), 1, 0)
+
+green.dots <- full.dat.final[ which(full.dat.final$mean < 0 & mean(grid.test3$std), ]
+
+plot(full.dat.final$mean, full.dat.final$std,  col = factor(full.dat.final$LowbutCons), xlab="mean", ylab="standard deviation")
+abline(v = 0, col="red", lwd=2)
+abline(h = mean(grid.test3$std), col="blue", lwd=2)
+points(green.dots$mean, green.dots$std, col="darkgreen")
+
+par(mfrow=c(1,1))
+
+```
+
+
+```{r}
+grid.test3$highCons <- full.dat.final$truthordare
+grid.test3$lowCons <- full.dat.final$LowbutCons
+
+plot(grid.test3["highCons"], pal = c("gray", "hotpink"))
+
+plot(grid.test3["lowCons"], pal=c("gray", "darkgreen"))
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+The above code works to run the basic methodology on a smaller rectangular part of the original field. (Tested on 2007 data)
+
+
+
+
+Below will begin the simulation code.
+
+```{r}
+#install.packages(c("fields", "MASS", "RandomFields"))
+
+# Load libraries
+library(fields)
+library(MASS)
+library(mgcv)
+```
+
+```{r}
+# Define spatial grid for the simulation (50 × 50)
+x_seq <- seq(0, 100, length.out = 51)
+y_seq <- seq(0, 100, length.out = 51)
+grid <- expand.grid(x = x_seq, y = y_seq)
+
+
+#Use spatial grid based on farm square we already have?
+plot(square)
+```
+
+
+
+
+April 2025 Update:
+```{r}
+#field to simulate on = grid (a field defined by ME)
+plot(grid) #Not equivalent to the data field
+coords <- grid
+
+sill <- 1
+nugget <- 0.1
+range <- 10
+
+#simulate GP/MVN yield data
+sim.field <- function(coords, range, sill=1, nugget=0.1){
+  dists <- rdist(coords)
+  covMat <- sill * exp(-dists/range)
+  diag(covMat) <- sill + nugget
+  yield.field <- mvrnorm(1, mu = rep(0, nrow(coords)), Sigma=covMat)
+  return(yield.field)
+}
+
+
+plot(yield.field)
+
+# # Simulate fields with different spatial consistency (toy example)
+# low_consistency <- sim.field(coords, range = 0.5)  
+# medium_consistency <- sim.field(coords, range = 2, sill=1, nugget=0.1)  
+# medium_consistency2 <- sim.field(coords, range = 2)  
+# high_consistency <- sim.field(coords, range = 5)  
+
+
+
+
+# Function to fit a GAM and visualize results
+plot_gam_smooth <- function(data, response, title) {
+  
+  # Fit a GAM with tensor product splines
+  gam_model <- gam(as.formula(paste(response, "~ te(x, y, bs = 'tp')")), data = data)
+  
+  data$predicted <- predict(gam_model, newdata = data)
+
+  ggplot(data, aes(x, y)) +
+    geom_tile(aes(fill = predicted)) +
+    scale_fill_viridis_c() +
+    labs(title = title, fill = "Yield") +
+    theme_minimal()
+}
+
+# 
+# 
+# plot_gam_smooth(data, "low", "High Spatial Consistency")
+#  gam_model <- gam(data$low ~ te(x, y, bs = 'tp'), data = data) # is spline smoothing TOO much?
+#  summary(gam_model)
+# 
+# 
+# plot_gam_smooth(data, "medium", "Medium Spatial Consistency")
+#  gam_model <- gam(data$medium ~ te(x, y, bs = 'tp'), data = data)
+#  summary(gam_model)
+#  
+#  plot_gam_smooth(data, "medium2", "Medium Spatial Consistency")
+#  gam_model <- gam(data$medium2 ~ te(x, y, bs = 'tp'), data = data)
+#  summary(gam_model)
+#  
+#  
+#  
+# plot_gam_smooth(data, "high", "Low Spatial Consistency, More localized differences in yield")
+#  gam_model <- gam(data$high ~ te(x, y, bs = 'tp'), data = data)
+#  summary(gam_model)
+```
+
+
+spatial variability AND consistency - separate concepts 
+
+Notes from Messing around with ^: 
+Increase the range parameter to create smoother yield surfaces.
+Modify the nugget effect to introduce small-scale noise.
+Change te(x, y, k=…) in gam() to control spline flexibility.
+
+
+How to simulate multiple years worth of data?
+
+
+Knot check function on splines- simon wood
+
+
+
+Start w medium template - years worth of data, very temporally consistent, BUT not identical
+add noise to the template
+need time dependence, not just new simulated data - add time and noise for each "year"
+
+generate a SF w range and sill
+
+field w 0=nug and small sill and play with the range to add to template
+
+
+```{r}
+#simulate GP/MVN yield data
+sim.field <- function(coords, range, sill, nugget){
+  dists <- rdist(coords)
+  covMat <- sill * exp(-dists/range)
+  diag(covMat) <- sill + nugget
+  yield.field <- mvrnorm(1, mu = rep(0, nrow(coords)), Sigma=covMat)
+  return(yield.field)
+}
+
+plot_gam_smooth <- function(data, response, title) {
+  
+  # Fit a GAM with tensor product splines
+  gam_model <- gam(as.formula(paste(response, "~ te(x, y, bs = 'tp')")), data = data)
+  
+  data$predicted <- predict(gam_model, newdata = data)
+
+  ggplot(data, aes(x, y)) +
+    geom_tile(aes(fill = predicted)) +
+    scale_fill_viridis_c() +
+    labs(title = title, fill = "Yield") +
+    theme_minimal()
+}
+
+
+
+#sill - variability (sigma t)
+#range = how far do I have to go before points are independent 
+# nugget = whats the correlation between things that are right next door 
+
+#pick a template for all time -> garden of forking paths
+#pick reasonably smooth template -> reduce nugget, increase the range 
+
+medium_consistency <- sim.field(coords, range = 100, sill=10, nugget=0.1)  #template
+#VAR BETWEEN YEARS AND TEMP NEEDS TO BE MUCH SMALLER THAN TEMP TO SHOW CONSISTENCY
+year1 <- sim.field(coords, range=2, sill=0.1, nugget = 0) # same conditional dist by YEAR
+year2 <- sim.field(coords, range=2, sill=0.1, nugget=0)
+year3 <- sim.field(coords, range=2, sill=0.1, nugget=0)
+
+
+r.noise1 <- rnorm(nrow(coords), 0, 0.01)  
+r.noise2 <- rnorm(nrow(coords), 0, 0.01)  
+r.noise3 <- rnorm(nrow(coords), 0, 0.01)  
+#medium1 + N(0, something) random noise - random indp measurement error 
+
+
+#template 2
+new.guy <- sim.field(coords, range = 15, sill=1, nugget=0)  #template- use this?
+
+
+
+
+data <- data.frame(coords, 
+                   medium = medium_consistency, year1=year1, year2=year2, year3=year3, medium1 = medium_consistency + year1, medium2 = medium_consistency + year2, medium3 = medium_consistency + year3, dat1=medium_consistency + year1 + r.noise1, dat2=medium_consistency + year2 + r.noise2, dat3=medium_consistency + year3 + r.noise3, new.guy=new.guy)
+
+
+#THESE HAVE BEEN GAMMED NOT RAW
+plot_gam_smooth(data, "year1", "TEST year 1")
+plot_gam_smooth(data, "year2", "TEST year 2")
+plot_gam_smooth(data, "year3", "TEST year 3")
+plot_gam_smooth(data, "medium", "TEST medium start") # template
+plot_gam_smooth(data, "medium1", "TEST medium year 1")
+plot_gam_smooth(data, "medium2", "TEST medium year 2")
+plot_gam_smooth(data, "medium3", "TEST medium year 3")
+
+
+plot_gam_smooth(data, "dat1", "TEST medium year 1")
+plot_gam_smooth(data, "dat2", "TEST medium year 2")
+
+
+#get SF plots of fields pre GAM
+data.sf <- st_as_sf(data, coords = c("x", "y"))
+plot(data.sf["medium3"], pch=19, cex=1.5) #big nugget
+
+data.sf <- st_as_sf(data, coords = c("x", "y"))
+plot(data.sf["new.guy"], pch=19, cex=1.5) #big nugget
+
+
+# high consistency = low sill!!!!!!!
+#diagram ideas:
+#standard
+#Plot year 1 - noise field (temporal variability field - still spatially correlated but different realizations to capture variability)
+#add details of covariance underneath? 
+#true std is the std of the three years simulated data around the template mean rather than the empirical mean and will be exactly the same no loss of df and exactly same as std of three noise fields around 0
+
+```
+
+
+
+```{r}
+temp.matrix <- as.matrix(st_drop_geometry(data.sf[,c("dat1", "dat2", "dat3")]))
+
+data.sf$mean <- apply(temp.matrix, 1, mean)
+data.sf$std <- apply(temp.matrix, 1, sd)
+
+plot(data.sf$mean, data.sf$std, xlab="mean", ylab="standard deviation")
+abline(v = 0, col="red", lwd=2)
+abline(h = mean(data.sf$std), col="blue", lwd=2)
+
+pink.dots <- data.sf[ which(data.sf$mean > 0 & data.sf$std < mean(data.sf$std)),]
+points(pink.dots$mean, pink.dots$std, col="hotpink")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+medium_consistency <- sim.field(coords, range = 1, sill=5, nugget=0.1) #low consistency
+
+data <- data.frame(coords, 
+                   medium = medium_consistency, year1=year1, year2=year2, year3=year3, medium1 = medium_consistency + year1, medium2 = medium_consistency + year2, medium3 = medium_consistency + year3, dat1=medium_consistency + year1 + r.noise1, dat2=medium_consistency + year2 + r.noise2, new.guy=new.guy)
+
+#get SF plots of fields pre GAM
+data.sf <- st_as_sf(data, coords = c("x", "y"))
+plot(data.sf["medium"], pch=19, cex=1.5) #big nugget
+```
+
+
+
+
+Work May 2025
+```{r}
+#model!
+model.sim.med1 <- gam(medium1 ~ te(x, y), data=data) 
+summary(model.sim.med1)
+plot(model.sim.med1)
+
+model.sim.med2 <- gam(medium2 ~ te(x, y), data=data) 
+summary(model.sim.med2)
+plot(model.sim.med2)
+
+model.sim.med3 <- gam(medium3 ~ te(x, y), data=data) 
+summary(model.sim.med3)
+plot(model.sim.med3)
+```
+
+```{r}
+square.sim <- st_as_sf(grid, coords = c("x","y"), crs = st_crs(grid))
+square.sim$predicted <- predict(model.sim.med1, newdata = st_drop_geometry(square.sim))
+
+plot(square.sim)
+
+cell_grid <- st_make_grid(
+  square.sim,             
+  n    = c(100,100),
+  what = "polygons"
+) %>%
+  st_sf() %>%
+  st_set_crs(st_crs(square.sim))
+
+
+cell_centroids <- st_centroid(cell_grid)
+coords <- st_coordinates(cell_centroids)
+
+cell_grid$predicted <- predict(
+  model.sim.med1,
+  newdata = data.frame(x = coords[,1], y = coords[,2])
+)
+
+
+
+
+#predictions
+data$pred.med1 <- predict(model.sim.med1, newdata=square.sim)
+plot(cell_grid["predicted"], main="Predictions Template + Year 1")
+```
+
+```{r}
+temp.matrix <- as.matrix(st_drop_geometry(data[,c("medium1", "medium2", "medium3")]))
+
+data$mean <- apply(temp.matrix, 1, mean)
+data$std <- apply(temp.matrix, 1, sd)
+
+plot(data$mean, data$std, xlab="mean", ylab="standard deviation")
+abline(v = 0, col="red", lwd=2)
+abline(h = mean(data$std), col="blue", lwd=2)
+
+pink.dots <- data[ which(data$mean > 0 & data$std < mean(data$std)),]
+points(pink.dots$mean, pink.dots$std, col="hotpink")
+
+```
+
+
+
+Tidyverse and SF communication problem - keep things in SF
+```{r}
+data_summary <- data %>%
+  rowwise() %>%
+  mutate(
+    # means & sds of the raw years
+    mean_year      = mean(c_across(year1:year3)),
+    sd_year        = sd(  c_across(year1:year3)),
+    # means & sds of the medium+year totals
+    mean_mediumTot = mean(c_across(medium1:medium3)),
+    sd_mediumTot   = sd(  c_across(medium1:medium3))
+  ) %>%
+  ungroup()
+
+head(data_summary)
+
+
+# turn into sf
+data_sf <- st_as_sf(data_summary, coords = c("X","Y"), crs = 4326) 
+
+
+df <- cbind(
+  st_coordinates(data_sf),
+  st_drop_geometry(data_sf)[, c("mean_year","sd_year","mean_mediumTot","sd_mediumTot")]
+)
+
+# plot mean of year effects
+ggplot(df, aes(X, Y, fill = mean_year)) +
+  geom_tile() + coord_equal() +
+  scale_fill_viridis_c() +
+  labs(title="Mean of Year1–Year3", fill="Mean(Year)")
+
+# plot mean of template+year effects
+ggplot(df, aes(X, Y, fill = mean_mediumTot)) +
+  geom_tile() + coord_equal() +
+  scale_fill_viridis_c() +
+  labs(title="Mean Year + Template", fill="Mean")
+
+# plot sd of year effects
+ggplot(df, aes(X, Y, fill = sd_year)) +
+  geom_tile() + coord_equal() +
+  scale_fill_viridis_c() +
+  labs(title="Sd of Year1–Year3", fill="Sd")
+
+# plot sd
+ggplot(df, aes(X, Y, fill = sd_mediumTot)) +
+  geom_tile() + coord_equal() +
+  scale_fill_viridis_c() +
+  labs(title="Std", fill="std dev")
+
+
+```
+
+
+
+```{r}
+library(ggplot2)
+library(viridis)
+library(patchwork)  # for combining plots
+library(sf)
+
+# Assume grid.test3 has predictions for each year and columns: mean, std, highCons, lowCons
+
+# Plot 1: Mean yield
+p1 <- ggplot(grid.test3) +
+  geom_sf(aes(fill = mean)) +
+  scale_fill_viridis(option = "C", name = "Mean Yield") +
+  ggtitle("Mean Yield Across Years") +
+  theme_minimal()
+
+# Plot 2: Standard Deviation
+p2 <- ggplot(grid.test3) +
+  geom_sf(aes(fill = std)) +
+  scale_fill_viridis(option = "D", name = "Standard Deviation") +
+  ggtitle("Yield Variability (Std Dev)") +
+  theme_minimal()
+
+# Plot 3: Highlight High Consistency (High Mean, Low SD)
+p3 <- ggplot(grid.test3) +
+  geom_sf(aes(fill = as.factor(highCons))) +
+  scale_fill_manual(values = c("0" = "gray80", "1" = "hotpink"),
+                    name = "High & Consistent",
+                    labels = c("No", "Yes")) +
+  ggtitle("High Mean, Low Variability") +
+  theme_minimal()
+
+# Plot 4: Highlight Low Consistency (Low Mean, Low SD)
+p4 <- ggplot(grid.test3) +
+  geom_sf(aes(fill = as.factor(lowCons))) +
+  scale_fill_manual(values = c("0" = "gray80", "1" = "darkgreen"),
+                    name = "Low & Consistent",
+                    labels = c("No", "Yes")) +
+  ggtitle("Low Mean, Low Variability") +
+  theme_minimal()
+
+# Combine into a 2x2 grid
+final_plot <- (p1 | p2) / (p3 | p4)
+final_plot
+
+```
+
+
+
